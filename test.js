@@ -55,14 +55,20 @@ test('interface: edição, persistência, conclusão, desfazer e gráfico',async
  const oldTimeout=globalThis.setTimeout;globalThis.setTimeout=()=>0;
  try {
  await import('./app.js');
- assert.match(nodes['#app'].innerHTML,/TREINOS DA SEMANA/);
+ assert.match(nodes['#app'].innerHTML,/<h1>TREINOS<\/h1>/);
  const click=dataset=>listeners.click({target:{closest:()=>({dataset,hasAttribute:()=>false})}});
+ const initialDay=(workouts.find(w=>w.number===new Date().getDay())||workouts[0]).id;
+ assert.match(nodes['#app'].innerHTML,new RegExp('id="day-'+initialDay+'"[^>]*aria-pressed="true"'));
+ const beforeTabs=store.get('meus-treinos-v1');
+ for(const w of workouts){click({day:w.id});assert.equal((nodes['#app'].innerHTML.match(/<article /g)||[]).length,1);assert.match(nodes['#app'].innerHTML,new RegExp('id="'+w.id+'"'));}
+ assert.equal(store.get('meus-treinos-v1'),beforeTabs);
+ click({day:'seg'});
  const segment=()=>nodes['#app'].innerHTML.match(/<article[^>]*id="seg">([\s\S]*?)<\/article>/)[1];
  click({toggle:'seg:leg'});
  assert.ok(segment().indexOf('data-exercise-row="seg:pant"')<segment().indexOf('data-exercise-row="seg:leg"'));
  assert.match(segment(),/1 de 12/);assert.match(segment(),/exercise-section">FEITOS/);
  const historyBefore=JSON.stringify(JSON.parse(store.get('meus-treinos-v1')).history);
- await import('./app.js?reload=1');assert.match(segment(),/1 de 12/);assert.match(segment(),/DESFAZER/);
+ await import('./app.js?reload=1');click({day:'seg'});assert.match(segment(),/1 de 12/);assert.match(segment(),/DESFAZER/);
  click({toggle:'seg:leg'});assert.match(segment(),/0 de 12/);
  assert.ok(segment().indexOf('data-exercise-row="seg:leg"')<segment().indexOf('data-exercise-row="seg:pant"'));
  assert.equal(JSON.stringify(JSON.parse(store.get('meus-treinos-v1')).history),historyBefore);
@@ -71,14 +77,28 @@ test('interface: edição, persistência, conclusão, desfazer e gráfico',async
  assert.equal(JSON.parse(store.get('meus-treinos-v1')).history.leg.at(-1).loads[0],115);
  click({complete:'seg'});let saved=JSON.parse(store.get('meus-treinos-v1'));assert.equal(saved.sessions.length,1);assert.match(nodes['#app'].innerHTML,/Desfazer conclusão/);
  click({undo:saved.sessions[0].id});assert.ok(JSON.parse(store.get('meus-treinos-v1')).sessions[0].undone);
- listeners.change({target:{dataset:{choice:weekKey()+':ter:dev'},value:'1'}});click({complete:'ter'});assert.equal(JSON.parse(store.get('meus-treinos-v1')).sessions.at(-1).selections.dev,1);
+ click({day:'ter'});listeners.change({target:{dataset:{choice:weekKey()+':ter:dev'},value:'1'}});click({complete:'ter'});assert.equal(JSON.parse(store.get('meus-treinos-v1')).sessions.at(-1).selections.dev,1);
  const preserved=store.get('meus-treinos-v1');const normalSet=localStorage.setItem;localStorage.setItem=()=>{throw Error('Armazenamento cheio');};click({complete:'qua'});assert.equal(store.get('meus-treinos-v1'),preserved);assert.equal(nodes['#message'].textContent,'Armazenamento cheio');localStorage.setItem=normalSet;
- nodes['#progress-tab'].onclick();assert.match(nodes['#app'].innerHTML,/<svg/);assert.match(nodes['#app'].innerHTML,/115 kg/);
+ nodes['#progress-tab'].onclick();assert.match(nodes['#app'].innerHTML,/<svg/);assert.doesNotMatch(nodes['#app'].innerHTML,/class="day-tabs"/);assert.match(nodes['#app'].innerHTML,/115 kg/);
  nodes['#training-tab'].onclick();
- for(const id of workouts[3].items)click({toggle:'qui:'+id});
+ click({day:'qui'});for(const id of workouts[3].items)click({toggle:'qui:'+id});
  assert.equal(JSON.parse(store.get('meus-treinos-v1')).sessions.filter(s=>s.workout==='qui'&&!s.undone).length,1);
+ assert.match(nodes['#app'].innerHTML,/id="day-qui"[^>]*aria-pressed="true"/);assert.match(nodes['#app'].innerHTML,/10 de 10/);assert.equal((nodes['#app'].innerHTML.match(/<article /g)||[]).length,1);
+ click({day:'seg'});click({day:'qui'});assert.match(nodes['#app'].innerHTML,/10 de 10/);
  click({toggle:'qui:leg'});assert.equal(JSON.parse(store.get('meus-treinos-v1')).sessions.filter(s=>s.workout==='qui'&&!s.undone).length,0);
  nodes['#progress-tab'].onclick();
  listeners.change({target:{id:'exercise-select',value:'dev'}});assert.match(nodes['#app'].innerHTML,/Máquina \/ Halter/);
+ const RealDate=globalThis.Date;
+ try{
+  for(let day=0;day<7;day++){
+   const fixed=new RealDate(2026,8,20+day,12);
+   globalThis.Date=class extends RealDate{constructor(...args){super(...(args.length?args:[fixed]));}static now(){return fixed.getTime();}};
+   await import('./app.js?weekday='+day);
+   const expected=(workouts.find(w=>w.number===day)||workouts[0]).id;
+   assert.match(nodes['#app'].innerHTML,new RegExp('id="day-'+expected+'"[^>]*aria-pressed="true"'));
+   click({day:'sex'});nodes['#progress-tab'].onclick();nodes['#training-tab'].onclick();
+   assert.match(nodes['#app'].innerHTML,/id="day-sex"[^>]*aria-pressed="true"/);
+  }
+ }finally{globalThis.Date=RealDate;}
  }finally{globalThis.setInterval=oldInterval;globalThis.setTimeout=oldTimeout;}
 });
