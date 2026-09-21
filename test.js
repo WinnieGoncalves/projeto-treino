@@ -1,6 +1,6 @@
 ﻿import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {workouts,createState,current,updateLoad,complete,undo,weekKey,migrateState,exerciseRecord,toggleExercise} from './model.js';
+import {exerciseCatalog,workoutPlan,saveExercise,deleteExercise,workouts,createState,current,updateLoad,complete,undo,weekKey,migrateState,exerciseRecord,toggleExercise} from './model.js';
 test('cargas, equivalências, alternativas, conclusão, desfazer e virada da semana',()=>{
  const s=createState('2026-09-14T12:00:00.000Z');
  assert.deepEqual(workouts.map(w=>w.items.length),[12,11,9,10,11,9]);
@@ -48,7 +48,12 @@ test('individual, conclusao automatica, migracao e semanas',()=>{
 test('interface: edição, persistência, conclusão, desfazer e gráfico',async()=>{
  const listeners={},nodes={};
  for(const id of ['#app','#message','#training-tab','#progress-tab'])nodes[id]={innerHTML:'',textContent:'',setAttribute(){},addEventListener(name,fn){listeners[name]=fn;},querySelector(){return {focus(){}};}};
- globalThis.document={querySelector:id=>nodes[id],getElementById:id=>nodes['#'+id]};
+ let modal;
+ globalThis.document={querySelector:id=>nodes[id],getElementById:id=>nodes['#'+id],body:{append(){}},createElement(){
+  const children={},events={};
+  modal={innerHTML:'',setAttribute(){},addEventListener(name,fn){events[name]=fn;},querySelector(selector){return children[selector]??={textContent:'',hidden:true,focus(){},querySelector:selector=>modal.querySelector(selector)};},showModal(){this.open=true;},close(){this.open=false;events.close?.();},remove(){}};
+  return modal;
+ }};
  const store=new Map();globalThis.localStorage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)};
  globalThis.window={addEventListener(){}};
  const oldInterval=globalThis.setInterval;globalThis.setInterval=()=>0;
@@ -88,6 +93,29 @@ test('interface: edição, persistência, conclusão, desfazer e gráfico',async
  click({toggle:'qui:leg'});assert.equal(JSON.parse(store.get('meus-treinos-v1')).sessions.filter(s=>s.workout==='qui'&&!s.undone).length,0);
  nodes['#progress-tab'].onclick();
  listeners.change({target:{id:'exercise-select',value:'dev'}});assert.match(nodes['#app'].innerHTML,/Máquina \/ Halter/);
+ nodes['#training-tab'].onclick();click({day:'seg'});
+ click({manage:'seg:ext'});assert.equal(modal.open,true);assert.match(modal.innerHTML,/EDITAR EXERCÍCIO/);
+ const submitModal=(name,load,reps)=>modal.querySelector('form').onsubmit({preventDefault(){},target:{elements:{name:{value:name},load0:{value:load},reps:{value:reps}}}});
+ submitModal('Extensora personalizada','80','3x12');assert.equal(modal.open,false);
+ await import('./app.js?custom=edit');click({day:'seg'});
+ assert.match(nodes['#app'].innerHTML,/Extensora personalizada/);assert.match(nodes['#app'].innerHTML,/3x12/);
+ assert.deepEqual(JSON.parse(store.get('meus-treinos-v1')).history.ext.map(h=>h.loads[0]),[70,80]);
+ click({day:'qui'});click({add:'qui'});submitModal('Hack Squat','50','4x10');
+ const newId=Object.keys(JSON.parse(store.get('meus-treinos-v1')).customExercises).find(id=>id.startsWith('exercise_'));
+ await import('./app.js?custom=add');
+ for(const w of workouts){click({day:w.id});assert.equal(nodes['#app'].innerHTML.includes('Hack Squat'),w.id==='qui');}
+ click({day:'qui'});click({toggle:'qui:'+newId});assert.match(nodes['#app'].innerHTML,new RegExp('class="row exercise-done" data-exercise-row="qui:'+newId+'"'));
+ click({toggle:'qui:'+newId});assert.match(nodes['#app'].innerHTML,new RegExp('class="row " data-exercise-row="qui:'+newId+'"'));
+ click({manage:'qui:'+newId});modal.querySelector('[data-delete]').onclick();
+ assert.match(modal.querySelector('p').textContent,/quinta-feira/);
+ modal.querySelector('[data-keep]').onclick();assert.ok(JSON.parse(store.get('meus-treinos-v1')).customWorkouts.qui.items.includes(newId));
+ const beforeFailure=store.get('meus-treinos-v1');localStorage.setItem=()=>{throw Error('Sem espaço');};submitModal('Não salvar','60','2x8');
+ assert.equal(modal.open,true);assert.equal(store.get('meus-treinos-v1'),beforeFailure);assert.equal(modal.querySelector('.error').textContent,'Sem espaço');localStorage.setItem=normalSet;
+ modal.querySelector('[data-delete]').onclick();modal.querySelector('[data-confirm]').onclick();
+ await import('./app.js?custom=delete');click({day:'qui'});assert.doesNotMatch(nodes['#app'].innerHTML,/Hack Squat/);
+ click({day:'seg'});click({manage:'seg:ext'});modal.querySelector('[data-delete]').onclick();modal.querySelector('[data-confirm]').onclick();
+ await import('./app.js?custom=delete-default');click({day:'seg'});assert.doesNotMatch(nodes['#app'].innerHTML,/data-manage="seg:ext"/);
+ nodes['#progress-tab'].onclick();listeners.change({target:{id:'exercise-select',value:newId}});assert.match(nodes['#app'].innerHTML,/Hack Squat/);assert.match(nodes['#app'].innerHTML,/<svg/);
  const RealDate=globalThis.Date;
  try{
   for(let day=0;day<7;day++){
@@ -101,4 +129,56 @@ test('interface: edição, persistência, conclusão, desfazer e gráfico',async
   }
  }finally{globalThis.Date=RealDate;}
  }finally{globalThis.setInterval=oldInterval;globalThis.setTimeout=oldTimeout;}
+});
+
+test('ficha personalizada: identidade, histórico, dias, exclusão e recarga',()=>{
+ let s=createState();
+ saveExercise(s,'sex','dev',{name:workouts[4].names.dev,reps:workouts[4].reps,loads:[12,4]});
+ assert.equal(exerciseCatalog(s).dev.renamed,false);
+ assert.equal(exerciseCatalog(s).dev.name,'Desenvolvimento Máquina ou Halter');
+ const original=JSON.stringify(s.history.ext);
+ saveExercise(s,'seg','ext',{name:'Extensora',reps:'3x12',loads:[70]});
+ assert.equal(JSON.stringify(s.history.ext),original);
+ assert.equal(exerciseCatalog(s).ext.name,'Extensora');
+ assert.equal(workoutPlan(s)[0].exerciseReps.ext,'3x12');
+ assert.equal(workoutPlan(s)[3].exerciseReps,undefined);
+ saveExercise(s,'seg','ext',{name:'Extensora',reps:'3x12',loads:[75]});
+ assert.deepEqual(s.history.ext.map(h=>h.loads[0]),[70,75]);
+ const id=saveExercise(s,'qui',undefined,{name:'Hack Squat',reps:'4x10',loads:[50]});
+ assert.match(id,/^exercise_/);
+ for(const w of workoutPlan(s))assert.equal(w.items.includes(id),w.id==='qui');
+ assert.deepEqual(s.history[id].map(h=>h.loads),[[50]]);
+ s=JSON.parse(JSON.stringify(s));
+ assert.equal(exerciseCatalog(s).ext.name,'Extensora');
+ assert.equal(workoutPlan(s)[0].exerciseReps.ext,'3x12');
+ assert.ok(workoutPlan(s)[3].items.includes(id));
+ const w=workoutPlan(s)[3];toggleExercise(s,w,id);
+ assert.deepEqual(exerciseRecord(s,w,id).loads,[50]);
+ saveExercise(s,'qui',id,{name:'Hack',reps:'3x8',loads:[55]});
+ assert.deepEqual(exerciseRecord(s,w,id).loads,[50]);
+ assert.deepEqual(current(s,id),[55]);
+ toggleExercise(s,w,id);assert.equal(exerciseRecord(s,w,id),undefined);
+ toggleExercise(s,w,id);complete(s,w);
+ const records=JSON.stringify(s.exerciseRecords),sessions=JSON.stringify(s.sessions);
+ deleteExercise(s,'qui',id);deleteExercise(s,'seg','ext');
+ s=JSON.parse(JSON.stringify(s));
+ assert.ok(!workoutPlan(s)[3].items.includes(id));
+ assert.ok(!workoutPlan(s)[0].items.includes('ext'));
+ assert.ok(workoutPlan(s)[3].items.includes('ext'));
+ assert.equal(JSON.stringify(s.exerciseRecords),records);assert.equal(JSON.stringify(s.sessions),sessions);
+ assert.deepEqual(current(s,id),[55]);
+ const fresh=saveExercise(s,'qui',undefined,{name:'Hack',reps:'3x8',loads:[10]});
+ assert.notEqual(fresh,id);assert.equal(exerciseRecord(s,workoutPlan(s)[3],fresh),undefined);
+ assert.ok(s.sessions.at(-1).undone);
+ toggleExercise(s,workoutPlan(s)[3],fresh);assert.ok(!s.sessions.at(-1).undone);
+ const next=new Date();next.setDate(next.getDate()+7);
+ assert.equal(exerciseRecord(s,workoutPlan(s)[3],fresh,next),undefined);
+ for(const invalid of [[-1],[NaN],[Infinity],[],['10'],null])assert.throws(()=>saveExercise(s,'qui',fresh,{name:'Hack',reps:'3x8',loads:invalid}));
+ for(const id of [...workoutPlan(s)[0].items])deleteExercise(s,'seg',id);
+ assert.deepEqual(workoutPlan(JSON.parse(JSON.stringify(s)))[0].items,[]);
+ assert.equal(workouts[0].items.length,12);
+ // A conclusão anterior sem carga permanece sem carga após editar a ficha.
+ toggleExercise(s,workoutPlan(s)[2],'flex');
+ saveExercise(s,'qua','flex',{name:'Flexão',reps:'3x10',loads:[5]});
+ complete(s,workoutPlan(s)[2]);assert.equal(s.sessions.at(-1).loads.flex,undefined);
 });

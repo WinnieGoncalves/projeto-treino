@@ -10,6 +10,12 @@ Abra http://localhost:3000. Para verificar as regras de dados: `npm test`.
 
 Os dados ficam no localStorage do navegador, na chave `meus-treinos-v1`. São mantidos após fechar ou atualizar a página, no mesmo navegador e endereço. Limpar os dados do site remove o histórico. Celular e computador têm armazenamentos independentes.
 
+Clique no nome de um exercício para editar nome, carga e séries/repetições. A exclusão fica nesse modal e exige confirmação. A opção `+ Adicionar exercício` inclui somente no dia selecionado. Nome e carga são compartilhados quando o mesmo ID aparece em mais de um dia; séries/repetições e exclusão são específicas do dia.
+
+As personalizações ficam em `customExercises` (cadastro por ID estável) e `customWorkouts` (lista de IDs e séries por dia), dentro da mesma chave existente. As listas salvas, inclusive vazias, têm prioridade sobre a ficha inicial. Excluir da ficha não apaga cargas nem registros históricos; o exercício continua disponível na progressão. Novos exercícios recebem um UUID e histórico próprio. Exercícios sem carga podem deixar o campo vazio; uma carga já registrada não pode ser apagada, mas pode ser alterada para zero.
+
+Teste real de navegador, sem dependências: `node test-browser.js`. Usa Chrome ou Edge instalado (ou `CHROME_PATH`), cria um perfil temporário isolado e verifica os modais, recargas, histórico, FEITO/DESFAZER e dimensões mobile. `SCREENSHOT_PATH` permite salvar uma captura ao final.
+
 A semana usa a data local e começa na segunda-feira. Conclusões anteriores e suas cargas são preservadas; desfazer marca o registro como desfeito, sem apagá-lo. Exercícios equivalentes usam um histórico único; alternativas têm duas cargas e duas linhas no gráfico.
 
 Adução e Coice possuem prescrições iniciais diferentes na segunda e quinta. Antes da primeira edição, cada dia exibe o valor informado. Depois de editar, todos os dias usam a última carga compartilhada. Os valores originais da quinta permanecem visíveis como referência. A progressão começa com a carga inicial da primeira ocorrência.
